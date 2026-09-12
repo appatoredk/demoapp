@@ -1,4 +1,4 @@
-import { app, list, search } from "google-play-scraper-fetch";
+import { app } from "google-play-scraper-fetch";
 
 // ==========================================
 // HELPER: formatear app a JSON limpio
@@ -142,7 +142,6 @@ export default {
       // /api/home — pantalla "Hoy" completa
       // ==========================================
       if (url.pathname === "/api/home") {
-        // Mezclamos todo el catálogo
         const todo = [...CATALOGO_JUEGOS, ...CATALOGO_APPS, ...CATALOGO_ARCADE];
         const mezclado = [...todo].sort(() => Math.random() - 0.5);
 
@@ -258,7 +257,9 @@ export default {
       }
 
       // ==========================================
-      // /api/search?q=...
+      // /api/search?q=... 
+      // Adaptado: como no hay search(), usamos un filtro local
+      // del catálogo + intento directo si parece un package name
       // ==========================================
       if (url.pathname === "/api/search") {
         const query = url.searchParams.get("q");
@@ -270,23 +271,55 @@ export default {
           );
         }
 
-        // Intentamos con search() si está disponible
-        try {
-          const resultados = await search({
-            term: query.trim(),
-            num: 15,
-            lang: "es",
-            country: "mx"
-          });
+        const q = query.trim().toLowerCase();
 
-          const apps = resultados.map((item) => formatearApp(item, item.appId));
-          return jsonResponse({ query, apps });
-        } catch (e) {
-          return jsonResponse(
-            { error: true, message: "Error en búsqueda: " + e.message },
-            500
-          );
+        // Si parece un package name (com.algo.algo), lo buscamos directo
+        if (q.includes(".")) {
+          try {
+            const datos = await app({
+              appId: q,
+              lang: "es",
+              country: "mx"
+            });
+            return jsonResponse({
+              query: q,
+              apps: [formatearApp(datos, q)]
+            });
+          } catch (e) {
+            return jsonResponse({ query: q, apps: [] });
+          }
         }
+
+        // Si es una palabra, devolvemos las apps del catálogo cuyo
+        // nombre contenga la palabra. Pero como no tenemos el nombre
+        // sin hacer la llamada, traemos TODO el catálogo y filtramos.
+        const todoCatalogo = [
+          ...CATALOGO_JUEGOS,
+          ...CATALOGO_APPS,
+          ...CATALOGO_ARCADE
+        ];
+
+        const promesas = todoCatalogo.map(async (id) => {
+          try {
+            const datos = await app({ appId: id, lang: "es", country: "mx" });
+            const item = formatearApp(datos, id);
+            const nombre = (item.name || "").toLowerCase();
+            const dev = (item.developer || "").toLowerCase();
+            if (nombre.includes(q) || dev.includes(q)) {
+              return item;
+            }
+            return null;
+          } catch (e) {
+            return null;
+          }
+        });
+
+        const resultados = (await Promise.all(promesas)).filter((x) => x !== null);
+
+        return jsonResponse({
+          query: q,
+          apps: resultados
+        });
       }
 
       // ==========================================
