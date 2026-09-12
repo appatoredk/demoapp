@@ -7,9 +7,9 @@ export default {
 
       const url = new URL(request.url);
 
-      // ==============================
-      // RUTA /api/app
-      // ==============================
+      // ==========================================
+      // /api/app?id=...
+      // ==========================================
 
       if (url.pathname === "/api/app") {
 
@@ -50,7 +50,15 @@ export default {
             priceText: datos.priceText || "Gratis",
             summary: datos.summary || "",
             description: datos.description || "",
-            screenshots: datos.screenshots || []
+            screenshots: datos.screenshots || [],
+            bannerAd:
+              datos.headerImage ||
+              (
+                datos.screenshots &&
+                datos.screenshots.length > 0
+                  ? datos.screenshots[0]
+                  : ""
+              )
           }),
           {
             headers: {
@@ -61,9 +69,70 @@ export default {
         );
       }
 
-      // ==============================
+
+      // ==========================================
+      // /api/random
+      // ==========================================
+
+      if (url.pathname === "/api/random") {
+
+        const aplicaciones = [
+          "com.google.android.youtube",
+          "com.whatsapp",
+          "com.instagram.android",
+          "com.spotify.music",
+          "com.google.android.apps.maps"
+        ];
+
+        const indice =
+          Math.floor(
+            Math.random() * aplicaciones.length
+          );
+
+        const appId =
+          aplicaciones[indice];
+
+        const datos = await app({
+          appId: appId,
+          lang: "es",
+          country: "mx"
+        });
+
+        return new Response(
+          JSON.stringify({
+            name: datos.title || "Sin nombre",
+            appId: datos.appId || appId,
+            developer: datos.developer || "Desconocido",
+            icon: datos.icon || "",
+            score: datos.score || 0,
+            scoreText: datos.scoreText || "",
+            installs: datos.installs || "",
+            priceText: datos.priceText || "Gratis",
+            summary: datos.summary || "",
+            description: datos.description || "",
+            screenshots: datos.screenshots || [],
+            bannerAd:
+              datos.headerImage ||
+              (
+                datos.screenshots &&
+                datos.screenshots.length > 0
+                  ? datos.screenshots[0]
+                  : ""
+              )
+          }),
+          {
+            headers: {
+              "Content-Type": "application/json; charset=UTF-8",
+              "Access-Control-Allow-Origin": "*"
+            }
+          }
+        );
+      }
+
+
+      // ==========================================
       // RUTA PRINCIPAL
-      // ==============================
+      // ==========================================
 
       return new Response(
         JSON.stringify({
@@ -93,7 +162,6 @@ export default {
           }
         }
       );
-
     }
   }
 };
