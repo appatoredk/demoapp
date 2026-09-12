@@ -7,19 +7,52 @@ export default {
 
       const url = new URL(request.url);
 
-      // Obtener el ID enviado en ?id=
-      const appId = url.searchParams.get("id");
+      // ==============================
+      // RUTA /api/app
+      // ==============================
 
-      // Si no enviaron ID
-      if (!appId || appId.trim() === "") {
+      if (url.pathname === "/api/app") {
+
+        const appId = url.searchParams.get("id");
+
+        if (!appId || appId.trim() === "") {
+
+          return new Response(
+            JSON.stringify({
+              error: true,
+              message: "Falta el parámetro id"
+            }),
+            {
+              status: 400,
+              headers: {
+                "Content-Type": "application/json; charset=UTF-8",
+                "Access-Control-Allow-Origin": "*"
+              }
+            }
+          );
+        }
+
+        const datos = await app({
+          appId: appId.trim(),
+          lang: "es",
+          country: "mx"
+        });
 
         return new Response(
           JSON.stringify({
-            error: true,
-            message: "Falta el parámetro id"
+            name: datos.title || "Sin nombre",
+            appId: datos.appId || appId,
+            developer: datos.developer || "Desconocido",
+            icon: datos.icon || "",
+            score: datos.score || 0,
+            scoreText: datos.scoreText || "",
+            installs: datos.installs || "",
+            priceText: datos.priceText || "Gratis",
+            summary: datos.summary || "",
+            description: datos.description || "",
+            screenshots: datos.screenshots || []
           }),
           {
-            status: 400,
             headers: {
               "Content-Type": "application/json; charset=UTF-8",
               "Access-Control-Allow-Origin": "*"
@@ -28,20 +61,14 @@ export default {
         );
       }
 
-      // Consultar Google Play
-      const datos = await app({
-        appId: appId.trim(),
-        lang: "es",
-        country: "mx"
-      });
+      // ==============================
+      // RUTA PRINCIPAL
+      // ==============================
 
-      // Devolver solamente los datos básicos
       return new Response(
         JSON.stringify({
-          name: datos.title || "Sin nombre",
-          appId: datos.appId || appId,
-          icon: datos.icon || "",
-          details: datos.description || ""
+          status: "online",
+          message: "Cloudflare Worker funcionando"
         }),
         {
           headers: {
