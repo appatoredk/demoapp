@@ -6,54 +6,41 @@ import { app } from "google-play-scraper-fetch";
 const CONFIG = {
   LANG: "es",
   COUNTRY: "mx",
-  TIMEOUT_MS: 8000,        // Timeout por app individual
-  HOME_SECTION_SIZE: 8,    // Apps por sección en /api/home
-  LIST_MAX_COUNT: 40,      // Máximo de apps en /api/list
+  TIMEOUT_MS: 8000,
+  HOME_SECTION_SIZE: 5,     // ← reducido para más velocidad
+  LIST_MAX_COUNT: 40,
 };
 
 // ==========================================
 // CACHÉ EN MEMORIA
 // ==========================================
 const CACHE = {
-  home: { data: null, time: 0, ttl: 60 * 1000 },       // 1 minuto
-  apps: new Map(),                                      // Por appId
-  lists: new Map(),                                     // Por category+count
-  APP_TTL: 5 * 60 * 1000,                              // 5 minutos por app
+  home: { data: null, time: 0, ttl: 60 * 1000 },
+  apps: new Map(),
+  lists: new Map(),
+  APP_TTL: 5 * 60 * 1000,
 };
 
 function getCacheHome() {
-  if (CACHE.home.data && Date.now() - CACHE.home.time < CACHE.home.ttl) {
-    return CACHE.home.data;
-  }
+  if (CACHE.home.data && Date.now() - CACHE.home.time < CACHE.home.ttl) return CACHE.home.data;
   return null;
 }
-
-function setCacheHome(data) {
-  CACHE.home = { data, time: Date.now(), ttl: CACHE.home.ttl };
-}
-
+function setCacheHome(data) { CACHE.home = { data, time: Date.now(), ttl: CACHE.home.ttl }; }
 function getCacheApp(id) {
   const item = CACHE.apps.get(id);
   if (item && Date.now() - item.time < CACHE.APP_TTL) return item.data;
   return null;
 }
-
-function setCacheApp(id, data) {
-  CACHE.apps.set(id, { data, time: Date.now() });
-}
-
+function setCacheApp(id, data) { CACHE.apps.set(id, { data, time: Date.now() }); }
 function getCacheList(key) {
   const item = CACHE.lists.get(key);
   if (item && Date.now() - item.time < CACHE.APP_TTL) return item.data;
   return null;
 }
-
-function setCacheList(key, data) {
-  CACHE.lists.set(key, { data, time: Date.now() });
-}
+function setCacheList(key, data) { CACHE.lists.set(key, { data, time: Date.now() }); }
 
 // ==========================================
-// HELPER: optimizar URL de imagen de Google
+// HELPER: optimizar URL de imagen
 // ==========================================
 function optimizarUrl(url, w, h) {
   if (!url || typeof url !== "string") return "";
@@ -65,7 +52,27 @@ function optimizarUrl(url, w, h) {
 }
 
 // ==========================================
-// HELPER: formatear app a JSON limpio
+// HELPER: obtener URLs de alternativas
+// ==========================================
+function getAlternativas(appId, appName) {
+  const id = appId || "";
+  const nombreLimpio = (appName || "").toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")
+    .replace(/\s+/g, "-")
+    .substring(0, 40);
+
+  return {
+    apkpure: "https://apkpure.com/" + nombreLimpio + "/" + id,
+    apkpureBuscar: "https://apkpure.com/search?q=" + encodeURIComponent(appName || id),
+    uptodown: "https://" + nombreLimpio + ".en.uptodown.com/android",
+    uptodownBuscar: "https://en.uptodown.com/android/search/" + encodeURIComponent(appName || id),
+    apkmirror: "https://www.apkmirror.com/?post_type=app_release&searchtype=apk&s=" + encodeURIComponent(appName || id),
+    playStore: "https://play.google.com/store/apps/details?id=" + id
+  };
+}
+
+// ==========================================
+// HELPER: formatear app
 // ==========================================
 function formatearApp(datos, appIdFallback) {
   if (!datos) return null;
@@ -77,25 +84,35 @@ function formatearApp(datos, appIdFallback) {
     datos.icon ||
     "";
 
+  const appId = datos.appId || appIdFallback || "";
+  const appName = datos.title || "Sin nombre";
+
   return {
-    name: datos.title || "Sin nombre",
-    appId: datos.appId || appIdFallback || "",
+    name: appName,
+    appId: appId,
     developer: datos.developer || "Desconocido",
+    developerId: datos.developerId || "",
     icon: optimizarUrl(datos.icon || "", 200, 200),
     score: datos.score || 0,
     scoreText: datos.scoreText || "",
+    ratings: datos.ratings || 0,
+    reviews: datos.reviews || 0,
     installs: datos.installs || "",
     priceText: datos.priceText || "Gratis",
+    price: datos.price || 0,
+    free: datos.free !== undefined ? datos.free : true,
+    currency: datos.currency || "USD",
     summary: datos.summary || "",
     description: datos.description || "",
     screenshots: screenshots.map((s) => optimizarUrl(s, 1080, 800)),
     bannerAd: optimizarUrl(bannerRaw, 1080, 600),
-    // ⭐ NUEVOS CAMPOS ÚTILES PARA FUTURO
     genre: datos.genre || "",
+    genreId: datos.genreId || "",
     updated: datos.updated || 0,
     version: datos.version || "",
     recentChanges: datos.recentChanges || "",
-    playUrl: "https://play.google.com/store/apps/details?id=" + (datos.appId || appIdFallback || "")
+    playUrl: "https://play.google.com/store/apps/details?id=" + appId,
+    alternativas: getAlternativas(appId, appName)
   };
 }
 
@@ -111,7 +128,7 @@ function jsonResponse(data, status = 200) {
 }
 
 // ==========================================
-// HELPER: fetch con timeout
+// HELPER: fetch con timeout y caché
 // ==========================================
 async function fetchConTimeout(appId) {
   const cached = getCacheApp(appId);
@@ -131,15 +148,9 @@ async function fetchConTimeout(appId) {
   }
 }
 
-// ==========================================
-// HELPER: obtener app con reintentos y fallback
-// ==========================================
 async function obtenerAppSegura(appId, poolFallback) {
-  // Intento 1
   let r = await fetchConTimeout(appId);
   if (r) return r;
-
-  // Intento 2: otro del pool
   if (poolFallback && poolFallback.length > 0) {
     const alt = poolFallback[Math.floor(Math.random() * poolFallback.length)];
     if (alt !== appId) {
@@ -147,18 +158,11 @@ async function obtenerAppSegura(appId, poolFallback) {
       if (r) return r;
     }
   }
-
-  // Intento 3: el primero del pool
-  if (poolFallback && poolFallback.length > 0 && poolFallback[0] !== appId) {
-    r = await fetchConTimeout(poolFallback[0]);
-    if (r) return r;
-  }
-
   return null;
 }
 
 // ==========================================
-// CATÁLOGO AMPLIADO
+// CATÁLOGOS
 // ==========================================
 const CATALOGO_JUEGOS = [
   "com.dts.freefireth", "com.epicgames.fortnite", "com.tencent.ig",
@@ -263,8 +267,7 @@ export default {
         if (!appId || appId.trim() === "") {
           return jsonResponse({ error: true, message: "Falta el parámetro id" }, 400);
         }
-        const id = appId.trim();
-        const datos = await fetchConTimeout(id);
+        const datos = await fetchConTimeout(appId.trim());
         if (!datos) {
           return jsonResponse({ error: true, message: "App no encontrada" }, 404);
         }
@@ -272,14 +275,49 @@ export default {
       }
 
       // ==========================================
+      // /api/check-update?id=com.whatsapp&version=2.24.1
+      // ==========================================
+      if (url.pathname === "/api/check-update") {
+        const appId = url.searchParams.get("id");
+        const currentVersion = url.searchParams.get("version");
+
+        if (!appId || appId.trim() === "") {
+          return jsonResponse({ error: true, message: "Falta el parámetro id" }, 400);
+        }
+
+        const datos = await fetchConTimeout(appId.trim());
+        if (!datos) {
+          return jsonResponse({
+            updateAvailable: false,
+            error: "App no encontrada en Play Store"
+          });
+        }
+
+        const latest = datos.version || "";
+        const updateAvailable = currentVersion && latest && (currentVersion !== latest);
+
+        return jsonResponse({
+          appId: appId,
+          name: datos.name,
+          currentVersion: currentVersion || "desconocida",
+          latestVersion: latest || "desconocida",
+          updateAvailable: updateAvailable,
+          recentChanges: datos.recentChanges || "",
+          updated: datos.updated || 0,
+          playUrl: datos.playUrl,
+          icon: datos.icon,
+          developer: datos.developer,
+          alternativas: datos.alternativas
+        });
+      }
+
+      // ==========================================
       // /api/random
       // ==========================================
       if (url.pathname === "/api/random") {
         const todo = [...CATALOGO_JUEGOS, ...CATALOGO_APPS, ...CATALOGO_ARCADE];
-        const intentos = 3;
-        for (let i = 0; i < intentos; i++) {
-          const appId = pick(todo);
-          const datos = await fetchConTimeout(appId);
+        for (let i = 0; i < 3; i++) {
+          const datos = await fetchConTimeout(pick(todo));
           if (datos) return jsonResponse(datos);
         }
         return jsonResponse({ error: true, message: "No se pudo cargar" }, 500);
@@ -289,15 +327,11 @@ export default {
       // /api/home
       // ==========================================
       if (url.pathname === "/api/home") {
-        // Caché de 1 minuto
         const cached = getCacheHome();
-        if (cached) {
-          return jsonResponse(cached);
-        }
+        if (cached) return jsonResponse(cached);
 
         const todo = [...CATALOGO_JUEGOS, ...CATALOGO_APPS, ...CATALOGO_ARCADE];
         const mezclado = shuffle(todo);
-
         const featuredId = mezclado[0];
         const segundaId = mezclado[1];
 
@@ -349,16 +383,14 @@ export default {
       }
 
       // ==========================================
-      // /api/list?category=juegos&count=30
+      // /api/list?category=juegos&count=30&type=free
       // ==========================================
       if (url.pathname === "/api/list") {
         const category = (url.searchParams.get("category") || "juegos").toLowerCase();
-        const count = Math.min(
-          parseInt(url.searchParams.get("count") || "20"),
-          CONFIG.LIST_MAX_COUNT
-        );
+        const count = Math.min(parseInt(url.searchParams.get("count") || "20"), CONFIG.LIST_MAX_COUNT);
+        const type = (url.searchParams.get("type") || "all").toLowerCase();  // all | free | paid
 
-        const cacheKey = category + "_" + count;
+        const cacheKey = category + "_" + count + "_" + type;
         const cached = getCacheList(cacheKey);
         if (cached) return jsonResponse(cached);
 
@@ -369,10 +401,18 @@ export default {
         else idsDisponibles = CATALOGO_JUEGOS;
 
         const mezclados = shuffle(idsDisponibles).slice(0, count);
-        const resultados = await obtenerApps(mezclados);
+        let resultados = await obtenerApps(mezclados);
+
+        // Filtrar por tipo (free/paid)
+        if (type === "free") {
+          resultados = resultados.filter((a) => a.free === true || a.price === 0 || a.priceText === "Free" || a.priceText === "Gratis");
+        } else if (type === "paid") {
+          resultados = resultados.filter((a) => a.free === false || a.price > 0);
+        }
 
         const respuesta = {
           category,
+          type,
           count: resultados.length,
           apps: resultados
         };
@@ -392,16 +432,11 @@ export default {
 
         const q = query.trim().toLowerCase();
 
-        // Si parece package name
         if (q.includes(".")) {
           const datos = await fetchConTimeout(q);
-          return jsonResponse({
-            query: q,
-            apps: datos ? [datos] : []
-          });
+          return jsonResponse({ query: q, apps: datos ? [datos] : [] });
         }
 
-        // Buscar en caché primero (mucho más rápido)
         const todoCatalogo = [...CATALOGO_JUEGOS, ...CATALOGO_APPS, ...CATALOGO_ARCADE];
         const resultados = [];
 
@@ -416,7 +451,6 @@ export default {
           }
         }
 
-        // Si no hubo resultados en caché, buscar en vivo (limitado a 20)
         if (resultados.length === 0) {
           const sinCache = todoCatalogo.filter((id) => !getCacheApp(id)).slice(0, 20);
           const encontrados = await obtenerApps(sinCache);
@@ -438,7 +472,7 @@ export default {
       return jsonResponse({
         status: "online",
         message: "Cloudflare Worker funcionando",
-        version: "2.0",
+        version: "3.0",
         cache: {
           home: CACHE.home.data ? "activo" : "vacío",
           appsEnCache: CACHE.apps.size,
@@ -446,9 +480,11 @@ export default {
         },
         endpoints: [
           "/api/app?id=com.example",
+          "/api/check-update?id=com.whatsapp&version=2.24.1",
           "/api/random",
           "/api/home",
-          "/api/list?category=juegos&count=8",
+          "/api/list?category=juegos&count=8&type=free",
+          "/api/list?category=apps&count=8&type=paid",
           "/api/search?q=whatsapp"
         ]
       });
