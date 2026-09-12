@@ -5,13 +5,11 @@ export default {
 
     try {
 
-      const datos = await app(
-        "com.google.android.youtube",
-        {
-          lang: "es",
-          country: "mx"
-        }
-      );
+      const datos = await app({
+        appId: "com.google.android.youtube",
+        lang: "es",
+        country: "mx"
+      });
 
       return new Response(
         JSON.stringify({
