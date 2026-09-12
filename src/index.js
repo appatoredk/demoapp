@@ -1,13 +1,27 @@
 import { app } from "google-play-scraper-fetch";
 
 // ==========================================
+// HELPER: optimizar URL de imagen de Google
+// ==========================================
+function optimizarUrl(url, w, h) {
+  if (!url || typeof url !== "string") return "";
+  // Si ya tiene tamaño definido, no tocar
+  if (url.includes("=w") || url.includes("=h")) return url;
+  // Si es de Play Store, agregar tamaño
+  if (url.includes("play-lh.googleusercontent.com")) {
+    return url + "=w" + w + "-h" + h;
+  }
+  return url;
+}
+
+// ==========================================
 // HELPER: formatear app a JSON limpio
 // ==========================================
 function formatearApp(datos, appIdFallback) {
   const screenshots = Array.isArray(datos.screenshots) ? datos.screenshots : [];
 
   // Mejor banner: headerImage > primer screenshot > ícono
-  const banner =
+  const bannerRaw =
     datos.headerImage ||
     (screenshots.length > 0 ? screenshots[0] : "") ||
     datos.icon ||
@@ -17,15 +31,22 @@ function formatearApp(datos, appIdFallback) {
     name: datos.title || "Sin nombre",
     appId: datos.appId || appIdFallback || "",
     developer: datos.developer || "Desconocido",
-    icon: datos.icon || "",
+
+    // Ícono optimizado a 200x200
+    icon: optimizarUrl(datos.icon || "", 200, 200),
+
     score: datos.score || 0,
     scoreText: datos.scoreText || "",
     installs: datos.installs || "",
     priceText: datos.priceText || "Gratis",
     summary: datos.summary || "",
     description: datos.description || "",
-    screenshots: screenshots,
-    bannerAd: banner
+
+    // Screenshots optimizados a 1080x800
+    screenshots: screenshots.map((s) => optimizarUrl(s, 1080, 800)),
+
+    // Banner optimizado a 1080x600
+    bannerAd: optimizarUrl(bannerRaw, 1080, 600)
   };
 }
 
