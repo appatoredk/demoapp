@@ -7,7 +7,7 @@
     "deploy": "wrangler deploy"
   },
   "dependencies": {
-    "parse-play": "^1.0.0"
+    "google-play-scraper-fetch": "latest"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"
