@@ -4,7 +4,7 @@ export default {
     const datos = {
       name: "Aplicación de prueba",
       appId: "com.prueba.app",
-      icon: "https://developers.cloudflare.com/favicon.ico",
+      icon: "https://raw.githubusercontent.com/github/explore/main/topics/android/android.png",
       details: "Esta es una aplicación de prueba funcionando con Cloudflare Workers."
     };
 
