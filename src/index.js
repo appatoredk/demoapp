@@ -1,24 +1,24 @@
-import { fetchApp } from "parse-play";
+import { app } from "google-play-scraper-fetch";
 
 export default {
   async fetch(request, env, ctx) {
 
     try {
 
-      const app = await fetchApp(
+      const datos = await app(
         "com.google.android.youtube",
         {
-          language: "ES",
-          country: "MX"
+          lang: "es",
+          country: "mx"
         }
       );
 
       return new Response(
         JSON.stringify({
-          name: app?.name || "Sin nombre",
-          appId: app?.app_id || "com.google.android.youtube",
-          icon: app?.icon_url || "",
-          details: app?.description || ""
+          name: datos.title || "Sin nombre",
+          appId: datos.appId || "com.google.android.youtube",
+          icon: datos.icon || "",
+          details: datos.description || ""
         }),
         {
           headers: {
@@ -43,6 +43,7 @@ export default {
           }
         }
       );
+
     }
   }
 };
