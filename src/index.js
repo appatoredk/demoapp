@@ -257,9 +257,8 @@ export default {
       }
 
       // ==========================================
-      // /api/search?q=... 
-      // Adaptado: como no hay search(), usamos un filtro local
-      // del catálogo + intento directo si parece un package name
+      // /api/search?q=...
+      // Adaptado: búsqueda local sobre el catálogo
       // ==========================================
       if (url.pathname === "/api/search") {
         const query = url.searchParams.get("q");
@@ -290,9 +289,7 @@ export default {
           }
         }
 
-        // Si es una palabra, devolvemos las apps del catálogo cuyo
-        // nombre contenga la palabra. Pero como no tenemos el nombre
-        // sin hacer la llamada, traemos TODO el catálogo y filtramos.
+        // Si es una palabra, filtramos el catálogo por nombre o desarrollador
         const todoCatalogo = [
           ...CATALOGO_JUEGOS,
           ...CATALOGO_APPS,
