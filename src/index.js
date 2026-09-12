@@ -7,7 +7,7 @@ const CONFIG = {
   LANG: "es",
   COUNTRY: "mx",
   TIMEOUT_MS: 8000,
-  HOME_SECTION_SIZE: 5,     // ← reducido para más velocidad
+  HOME_SECTION_SIZE: 5,
   LIST_MAX_COUNT: 40,
 };
 
@@ -52,7 +52,7 @@ function optimizarUrl(url, w, h) {
 }
 
 // ==========================================
-// HELPER: obtener URLs de alternativas
+// HELPER: URLs de alternativas (APKPure, Uptodown, etc.)
 // ==========================================
 function getAlternativas(appId, appName) {
   const id = appId || "";
@@ -293,15 +293,33 @@ export default {
           });
         }
 
-        const latest = datos.version || "";
-        const updateAvailable = currentVersion && latest && (currentVersion !== latest);
+        let latest = datos.version || "";
+
+        // Si Play Store devuelve "VARY" o está vacío, usamos fecha como referencia
+        const versionInvalida = !latest ||
+                                latest === "VARY" ||
+                                latest === "Varies with device" ||
+                                latest.toUpperCase() === "VARY";
+
+        let updateAvailable = false;
+        let metodo = "version";
+
+        if (versionInvalida) {
+          metodo = "fecha";
+          const updated = datos.updated || 0;
+          const diasDesde = (Date.now() - updated) / (1000 * 60 * 60 * 24);
+          updateAvailable = diasDesde > 0 && diasDesde < 60;
+        } else {
+          updateAvailable = currentVersion && (currentVersion !== latest);
+        }
 
         return jsonResponse({
           appId: appId,
           name: datos.name,
           currentVersion: currentVersion || "desconocida",
-          latestVersion: latest || "desconocida",
+          latestVersion: versionInvalida ? "no disponible (varía)" : latest,
           updateAvailable: updateAvailable,
+          metodo: metodo,
           recentChanges: datos.recentChanges || "",
           updated: datos.updated || 0,
           playUrl: datos.playUrl,
@@ -388,7 +406,7 @@ export default {
       if (url.pathname === "/api/list") {
         const category = (url.searchParams.get("category") || "juegos").toLowerCase();
         const count = Math.min(parseInt(url.searchParams.get("count") || "20"), CONFIG.LIST_MAX_COUNT);
-        const type = (url.searchParams.get("type") || "all").toLowerCase();  // all | free | paid
+        const type = (url.searchParams.get("type") || "all").toLowerCase();
 
         const cacheKey = category + "_" + count + "_" + type;
         const cached = getCacheList(cacheKey);
@@ -403,7 +421,6 @@ export default {
         const mezclados = shuffle(idsDisponibles).slice(0, count);
         let resultados = await obtenerApps(mezclados);
 
-        // Filtrar por tipo (free/paid)
         if (type === "free") {
           resultados = resultados.filter((a) => a.free === true || a.price === 0 || a.priceText === "Free" || a.priceText === "Gratis");
         } else if (type === "paid") {
@@ -472,7 +489,7 @@ export default {
       return jsonResponse({
         status: "online",
         message: "Cloudflare Worker funcionando",
-        version: "3.0",
+        version: "3.1",
         cache: {
           home: CACHE.home.data ? "activo" : "vacío",
           appsEnCache: CACHE.apps.size,
