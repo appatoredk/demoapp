@@ -4,6 +4,15 @@ import { app } from "google-play-scraper-fetch";
 // HELPER: formatear app a JSON limpio
 // ==========================================
 function formatearApp(datos, appIdFallback) {
+  const screenshots = Array.isArray(datos.screenshots) ? datos.screenshots : [];
+
+  // Mejor banner: headerImage > primer screenshot > ícono
+  const banner =
+    datos.headerImage ||
+    (screenshots.length > 0 ? screenshots[0] : "") ||
+    datos.icon ||
+    "";
+
   return {
     name: datos.title || "Sin nombre",
     appId: datos.appId || appIdFallback || "",
@@ -15,12 +24,8 @@ function formatearApp(datos, appIdFallback) {
     priceText: datos.priceText || "Gratis",
     summary: datos.summary || "",
     description: datos.description || "",
-    screenshots: datos.screenshots || [],
-    bannerAd:
-      datos.headerImage ||
-      (datos.screenshots && datos.screenshots.length > 0
-        ? datos.screenshots[0]
-        : "")
+    screenshots: screenshots,
+    bannerAd: banner
   };
 }
 
@@ -83,6 +88,19 @@ const CATALOGO_ARCADE = [
   "com.telltalegames.walkingdead100",
   "com.and.games505.TerrariaPaid"
 ];
+
+// ==========================================
+// HELPER: obtener varias apps en paralelo
+// ==========================================
+async function obtenerApps(ids) {
+  const promesas = ids.map((id) =>
+    app({ appId: id, lang: "es", country: "mx" })
+      .then((d) => formatearApp(d, id))
+      .catch(() => null)
+  );
+  const resultados = await Promise.all(promesas);
+  return resultados.filter((x) => x !== null);
+}
 
 // ==========================================
 // EXPORT DEFAULT — el Worker
@@ -155,27 +173,9 @@ export default {
           await Promise.all([
             app({ appId: featuredId, lang: "es", country: "mx" }).catch(() => null),
             app({ appId: segundaId, lang: "es", country: "mx" }).catch(() => null),
-            Promise.all(
-              toma4(CATALOGO_JUEGOS).map((id) =>
-                app({ appId: id, lang: "es", country: "mx" })
-                  .then((d) => formatearApp(d, id))
-                  .catch(() => null)
-              )
-            ),
-            Promise.all(
-              toma4(CATALOGO_APPS).map((id) =>
-                app({ appId: id, lang: "es", country: "mx" })
-                  .then((d) => formatearApp(d, id))
-                  .catch(() => null)
-              )
-            ),
-            Promise.all(
-              toma4(CATALOGO_ARCADE).map((id) =>
-                app({ appId: id, lang: "es", country: "mx" })
-                  .then((d) => formatearApp(d, id))
-                  .catch(() => null)
-              )
-            )
+            obtenerApps(toma4(CATALOGO_JUEGOS)),
+            obtenerApps(toma4(CATALOGO_APPS)),
+            obtenerApps(toma4(CATALOGO_ARCADE))
           ]);
 
         const titulosJuegos = [
@@ -206,17 +206,17 @@ export default {
             {
               titulo: pick(titulosJuegos),
               categoria: "juegos",
-              apps: juegosData.filter(Boolean)
+              apps: juegosData
             },
             {
               titulo: pick(titulosApps),
               categoria: "apps",
-              apps: appsData.filter(Boolean)
+              apps: appsData
             },
             {
               titulo: pick(titulosArcade),
               categoria: "arcade",
-              apps: arcadeData.filter(Boolean)
+              apps: arcadeData
             }
           ]
         });
@@ -238,16 +238,7 @@ export default {
         const mezclados = [...idsDisponibles].sort(() => Math.random() - 0.5);
         const seleccionados = mezclados.slice(0, count);
 
-        const promesas = seleccionados.map(async (id) => {
-          try {
-            const datos = await app({ appId: id, lang: "es", country: "mx" });
-            return formatearApp(datos, id);
-          } catch (e) {
-            return null;
-          }
-        });
-
-        const resultados = (await Promise.all(promesas)).filter((x) => x !== null);
+        const resultados = await obtenerApps(seleccionados);
 
         return jsonResponse({
           category,
@@ -258,7 +249,6 @@ export default {
 
       // ==========================================
       // /api/search?q=...
-      // Adaptado: búsqueda local sobre el catálogo
       // ==========================================
       if (url.pathname === "/api/search") {
         const query = url.searchParams.get("q");
@@ -296,22 +286,13 @@ export default {
           ...CATALOGO_ARCADE
         ];
 
-        const promesas = todoCatalogo.map(async (id) => {
-          try {
-            const datos = await app({ appId: id, lang: "es", country: "mx" });
-            const item = formatearApp(datos, id);
-            const nombre = (item.name || "").toLowerCase();
-            const dev = (item.developer || "").toLowerCase();
-            if (nombre.includes(q) || dev.includes(q)) {
-              return item;
-            }
-            return null;
-          } catch (e) {
-            return null;
-          }
-        });
+        const todas = await obtenerApps(todoCatalogo);
 
-        const resultados = (await Promise.all(promesas)).filter((x) => x !== null);
+        const resultados = todas.filter((item) => {
+          const nombre = (item.name || "").toLowerCase();
+          const dev = (item.developer || "").toLowerCase();
+          return nombre.includes(q) || dev.includes(q);
+        });
 
         return jsonResponse({
           query: q,
