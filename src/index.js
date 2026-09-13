@@ -12,7 +12,7 @@ const CONFIG = {
 };
 
 // ==========================================
-// CACHÉ EN MEMORIA (Solo para info de apps, no APKs)
+// CACHÉ EN MEMORIA
 // ==========================================
 const CACHE = {
   home: { data: null, time: 0, ttl: 60 * 1000 },
@@ -67,7 +67,8 @@ function getAlternativas(appId, appName) {
     uptodown: "https://" + nombreLimpio + ".en.uptodown.com/android",
     uptodownBuscar: "https://en.uptodown.com/android/search/" + encodeURIComponent(appName || id),
     apkmirror: "https://www.apkmirror.com/?post_type=app_release&searchtype=apk&s=" + encodeURIComponent(appName || id),
-    playStore: "https://play.google.com/store/apps/details?id=" + id
+    playStore: "https://play.google.com/store/apps/details?id=" + id,
+    apkpureDirect: "https://d.apkpure.com/b/APK/" + id + "?version=latest"
   };
 }
 
@@ -112,6 +113,7 @@ function formatearApp(datos, appIdFallback) {
     version: datos.version || "",
     recentChanges: datos.recentChanges || "",
     playUrl: "https://play.google.com/store/apps/details?id=" + appId,
+    downloadUrl: "https://d.apkpure.com/b/APK/" + appId + "?version=latest",
     alternativas: getAlternativas(appId, appName)
   };
 }
@@ -159,82 +161,6 @@ async function obtenerAppSegura(appId, poolFallback) {
     }
   }
   return null;
-}
-
-// ==========================================
-// HELPER: Obtener URL directa desde Evozi
-// ==========================================
-async function obtenerApkUrlEvozi(appId) {
-  try {
-    const resp = await fetch("https://apps.evozi.com/apk-downloader/", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-        "User-Agent": "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36",
-        "Referer": "https://apps.evozi.com/apk-downloader/"
-      },
-      body: "id=" + encodeURIComponent(appId)
-    });
-
-    if (!resp.ok) return null;
-
-    const json = await resp.json();
-
-    if (json && json.url) {
-      return json.url;
-    } else if (json && json.data && json.data.url) {
-      return json.data.url;
-    }
-
-    return null;
-  } catch (e) {
-    return null;
-  }
-}
-
-// ==========================================
-// HELPER: Buscar URL directa del APK en APKPure (Respaldo)
-// ==========================================
-async function obtenerApkUrlAPKPure(appName, appId) {
-  try {
-    const nombreLimpio = (appName || "").toLowerCase()
-      .replace(/[^a-z0-9\s]/g, "")
-      .replace(/\s+/g, "-");
-
-    const urls = [
-      "https://apkpure.com/" + nombreLimpio + "/" + appId,
-      "https://apkpure.com/search?q=" + encodeURIComponent(appName || appId)
-    ];
-
-    for (const urlPagina of urls) {
-      try {
-        const resp = await fetch(urlPagina, {
-          headers: {
-            "User-Agent": "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36",
-            "Accept": "text/html,application/xhtml+xml"
-          },
-          redirect: "follow"
-        });
-
-        if (!resp.ok) continue;
-
-        const html = await resp.text();
-        const patrones = [
-          /href="(https:\/\/d\.apkpure\.net\/[^"]+\.apk[^"]*)"/i,
-          /href="(https:\/\/download\.apkpure\.com\/[^"]+\.apk[^"]*)"/i,
-          /"(https:\/\/d\.apkpure\.net\/b\/[^"]+\.apk[^"]*)"/i
-        ];
-
-        for (const patron of patrones) {
-          const match = html.match(patron);
-          if (match && match[1]) return match[1];
-        }
-      } catch (e) { continue; }
-    }
-    return null;
-  } catch (e) {
-    return null;
-  }
 }
 
 // ==========================================
@@ -352,7 +278,7 @@ export default {
 
       // ==========================================
       // /api/download?id=com.whatsapp
-      // Intenta con Evozi (Google Play) y si falla, con APKPure
+      // Redirige DIRECTO al APK de APKPure (sin scraping)
       // ==========================================
       if (url.pathname === "/api/download") {
         const appId = url.searchParams.get("id");
@@ -361,35 +287,17 @@ export default {
         }
 
         const id = appId.trim();
-        
-        // 1. Intentar con Evozi
-        let urlApk = await obtenerApkUrlEvozi(id);
-        
-        // 2. Si falla, intentar con APKPure
-        if (!urlApk) {
-          const datos = await fetchConTimeout(id);
-          if (datos) {
-            urlApk = await obtenerApkUrlAPKPure(datos.name, id);
-          }
-        }
+        const urlApk = "https://d.apkpure.com/b/APK/" + id + "?version=latest";
 
-        if (urlApk) {
-          // Redirect 302 al APK
-          return new Response(null, {
-            status: 302,
-            headers: {
-              "Location": urlApk,
-              "Access-Control-Allow-Origin": "*",
-              "Cache-Control": "no-cache"
-            }
-          });
-        } else {
-          return jsonResponse({
-            error: false,
-            mensaje: "No se encontró link directo. Abre la página manual.",
-            urlManual: "https://apkpure.com/search?q=" + encodeURIComponent(id)
-          });
-        }
+        // Redirect 302 → DownloadManager descarga directo
+        return new Response(null, {
+          status: 302,
+          headers: {
+            "Location": urlApk,
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "no-cache"
+          }
+        });
       }
 
       // ==========================================
@@ -517,7 +425,8 @@ export default {
         return jsonResponse(respuesta);
       }
 
-           // /api/list?category=juegos&count=30&type=free
+      // ==========================================
+      // /api/list?category=juegos&count=30&type=free
       // ==========================================
       if (url.pathname === "/api/list") {
         const category = (url.searchParams.get("category") || "juegos").toLowerCase();
@@ -538,7 +447,10 @@ export default {
         let resultados = await obtenerApps(mezclados);
 
         if (type === "free") {
-          resultados = resultados.filter((a) => a.free === true || a.price === 0 || a.priceText === "Free" || a.priceText === "Gratis");
+          resultados = resultados.filter((a) =>
+            a.free === true || a.price === 0 ||
+            a.priceText === "Free" || a.priceText === "Gratis"
+          );
         } else if (type === "paid") {
           resultados = resultados.filter((a) => a.free === false || a.price > 0);
         }
@@ -599,13 +511,15 @@ export default {
         return jsonResponse({ query: q, apps: resultados });
       }
 
+      
+      
       // ==========================================
       // RUTA PRINCIPAL
       // ==========================================
       return jsonResponse({
         status: "online",
         message: "Cloudflare Worker funcionando",
-        version: "3.3",
+        version: "4.0",
         cache: {
           home: CACHE.home.data ? "activo" : "vacío",
           appsEnCache: CACHE.apps.size,
