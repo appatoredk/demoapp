@@ -12,7 +12,7 @@ const CONFIG = {
 };
 
 // ==========================================
-// CACHÉ EN MEMORIA
+// CACHÉ EN MEMORIA (Solo para info de apps, no APKs)
 // ==========================================
 const CACHE = {
   home: { data: null, time: 0, ttl: 60 * 1000 },
@@ -52,7 +52,7 @@ function optimizarUrl(url, w, h) {
 }
 
 // ==========================================
-// HELPER: URLs de alternativas (APKPure, Uptodown, etc.)
+// HELPER: URLs de alternativas
 // ==========================================
 function getAlternativas(appId, appName) {
   const id = appId || "";
@@ -159,6 +159,82 @@ async function obtenerAppSegura(appId, poolFallback) {
     }
   }
   return null;
+}
+
+// ==========================================
+// HELPER: Obtener URL directa desde Evozi
+// ==========================================
+async function obtenerApkUrlEvozi(appId) {
+  try {
+    const resp = await fetch("https://apps.evozi.com/apk-downloader/", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "User-Agent": "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36",
+        "Referer": "https://apps.evozi.com/apk-downloader/"
+      },
+      body: "id=" + encodeURIComponent(appId)
+    });
+
+    if (!resp.ok) return null;
+
+    const json = await resp.json();
+
+    if (json && json.url) {
+      return json.url;
+    } else if (json && json.data && json.data.url) {
+      return json.data.url;
+    }
+
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// ==========================================
+// HELPER: Buscar URL directa del APK en APKPure (Respaldo)
+// ==========================================
+async function obtenerApkUrlAPKPure(appName, appId) {
+  try {
+    const nombreLimpio = (appName || "").toLowerCase()
+      .replace(/[^a-z0-9\s]/g, "")
+      .replace(/\s+/g, "-");
+
+    const urls = [
+      "https://apkpure.com/" + nombreLimpio + "/" + appId,
+      "https://apkpure.com/search?q=" + encodeURIComponent(appName || appId)
+    ];
+
+    for (const urlPagina of urls) {
+      try {
+        const resp = await fetch(urlPagina, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36",
+            "Accept": "text/html,application/xhtml+xml"
+          },
+          redirect: "follow"
+        });
+
+        if (!resp.ok) continue;
+
+        const html = await resp.text();
+        const patrones = [
+          /href="(https:\/\/d\.apkpure\.net\/[^"]+\.apk[^"]*)"/i,
+          /href="(https:\/\/download\.apkpure\.com\/[^"]+\.apk[^"]*)"/i,
+          /"(https:\/\/d\.apkpure\.net\/b\/[^"]+\.apk[^"]*)"/i
+        ];
+
+        for (const patron of patrones) {
+          const match = html.match(patron);
+          if (match && match[1]) return match[1];
+        }
+      } catch (e) { continue; }
+    }
+    return null;
+  } catch (e) {
+    return null;
+  }
 }
 
 // ==========================================
@@ -275,6 +351,48 @@ export default {
       }
 
       // ==========================================
+      // /api/download?id=com.whatsapp
+      // Intenta con Evozi (Google Play) y si falla, con APKPure
+      // ==========================================
+      if (url.pathname === "/api/download") {
+        const appId = url.searchParams.get("id");
+        if (!appId || appId.trim() === "") {
+          return jsonResponse({ error: true, message: "Falta el parámetro id" }, 400);
+        }
+
+        const id = appId.trim();
+        
+        // 1. Intentar con Evozi
+        let urlApk = await obtenerApkUrlEvozi(id);
+        
+        // 2. Si falla, intentar con APKPure
+        if (!urlApk) {
+          const datos = await fetchConTimeout(id);
+          if (datos) {
+            urlApk = await obtenerApkUrlAPKPure(datos.name, id);
+          }
+        }
+
+        if (urlApk) {
+          // Redirect 302 al APK
+          return new Response(null, {
+            status: 302,
+            headers: {
+              "Location": urlApk,
+              "Access-Control-Allow-Origin": "*",
+              "Cache-Control": "no-cache"
+            }
+          });
+        } else {
+          return jsonResponse({
+            error: false,
+            mensaje: "No se encontró link directo. Abre la página manual.",
+            urlManual: "https://apkpure.com/search?q=" + encodeURIComponent(id)
+          });
+        }
+      }
+
+      // ==========================================
       // /api/check-update?id=com.whatsapp&version=2.24.1
       // ==========================================
       if (url.pathname === "/api/check-update") {
@@ -295,7 +413,6 @@ export default {
 
         let latest = datos.version || "";
 
-        // Si Play Store devuelve "VARY" o está vacío, usamos fecha como referencia
         const versionInvalida = !latest ||
                                 latest === "VARY" ||
                                 latest === "Varies with device" ||
@@ -422,91 +539,4 @@ export default {
         let resultados = await obtenerApps(mezclados);
 
         if (type === "free") {
-          resultados = resultados.filter((a) => a.free === true || a.price === 0 || a.priceText === "Free" || a.priceText === "Gratis");
-        } else if (type === "paid") {
-          resultados = resultados.filter((a) => a.free === false || a.price > 0);
-        }
-
-        const respuesta = {
-          category,
-          type,
-          count: resultados.length,
-          apps: resultados
-        };
-
-        setCacheList(cacheKey, respuesta);
-        return jsonResponse(respuesta);
-      }
-
-      // ==========================================
-      // /api/search?q=...
-      // ==========================================
-      if (url.pathname === "/api/search") {
-        const query = url.searchParams.get("q");
-        if (!query || query.trim() === "") {
-          return jsonResponse({ error: true, message: "Falta el parámetro q" }, 400);
-        }
-
-        const q = query.trim().toLowerCase();
-
-        if (q.includes(".")) {
-          const datos = await fetchConTimeout(q);
-          return jsonResponse({ query: q, apps: datos ? [datos] : [] });
-        }
-
-        const todoCatalogo = [...CATALOGO_JUEGOS, ...CATALOGO_APPS, ...CATALOGO_ARCADE];
-        const resultados = [];
-
-        for (const id of todoCatalogo) {
-          const cached = getCacheApp(id);
-          if (cached) {
-            const nombre = (cached.name || "").toLowerCase();
-            const dev = (cached.developer || "").toLowerCase();
-            if (nombre.includes(q) || dev.includes(q)) {
-              resultados.push(cached);
-            }
-          }
-        }
-
-        if (resultados.length === 0) {
-          const sinCache = todoCatalogo.filter((id) => !getCacheApp(id)).slice(0, 20);
-          const encontrados = await obtenerApps(sinCache);
-          for (const item of encontrados) {
-            const nombre = (item.name || "").toLowerCase();
-            const dev = (item.developer || "").toLowerCase();
-            if (nombre.includes(q) || dev.includes(q)) {
-              resultados.push(item);
-            }
-          }
-        }
-
-        return jsonResponse({ query: q, apps: resultados });
-      }
-
-      // ==========================================
-      // RUTA PRINCIPAL
-      // ==========================================
-      return jsonResponse({
-        status: "online",
-        message: "Cloudflare Worker funcionando",
-        version: "3.1",
-        cache: {
-          home: CACHE.home.data ? "activo" : "vacío",
-          appsEnCache: CACHE.apps.size,
-          listasEnCache: CACHE.lists.size
-        },
-        endpoints: [
-          "/api/app?id=com.example",
-          "/api/check-update?id=com.whatsapp&version=2.24.1",
-          "/api/random",
-          "/api/home",
-          "/api/list?category=juegos&count=8&type=free",
-          "/api/list?category=apps&count=8&type=paid",
-          "/api/search?q=whatsapp"
-        ]
-      });
-    } catch (error) {
-      return jsonResponse({ error: true, message: error.message }, 500);
-    }
-  }
-};
+          resultados = resultad
