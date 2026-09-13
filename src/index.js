@@ -517,8 +517,7 @@ export default {
         return jsonResponse(respuesta);
       }
 
-      // ==========================================
-      // /api/list?category=juegos&count=30&type=free
+           // /api/list?category=juegos&count=30&type=free
       // ==========================================
       if (url.pathname === "/api/list") {
         const category = (url.searchParams.get("category") || "juegos").toLowerCase();
@@ -539,4 +538,92 @@ export default {
         let resultados = await obtenerApps(mezclados);
 
         if (type === "free") {
-          resultados = resultad
+          resultados = resultados.filter((a) => a.free === true || a.price === 0 || a.priceText === "Free" || a.priceText === "Gratis");
+        } else if (type === "paid") {
+          resultados = resultados.filter((a) => a.free === false || a.price > 0);
+        }
+
+        const respuesta = {
+          category,
+          type,
+          count: resultados.length,
+          apps: resultados
+        };
+
+        setCacheList(cacheKey, respuesta);
+        return jsonResponse(respuesta);
+      }
+
+      // ==========================================
+      // /api/search?q=...
+      // ==========================================
+      if (url.pathname === "/api/search") {
+        const query = url.searchParams.get("q");
+        if (!query || query.trim() === "") {
+          return jsonResponse({ error: true, message: "Falta el parámetro q" }, 400);
+        }
+
+        const q = query.trim().toLowerCase();
+
+        if (q.includes(".")) {
+          const datos = await fetchConTimeout(q);
+          return jsonResponse({ query: q, apps: datos ? [datos] : [] });
+        }
+
+        const todoCatalogo = [...CATALOGO_JUEGOS, ...CATALOGO_APPS, ...CATALOGO_ARCADE];
+        const resultados = [];
+
+        for (const id of todoCatalogo) {
+          const cached = getCacheApp(id);
+          if (cached) {
+            const nombre = (cached.name || "").toLowerCase();
+            const dev = (cached.developer || "").toLowerCase();
+            if (nombre.includes(q) || dev.includes(q)) {
+              resultados.push(cached);
+            }
+          }
+        }
+
+        if (resultados.length === 0) {
+          const sinCache = todoCatalogo.filter((id) => !getCacheApp(id)).slice(0, 20);
+          const encontrados = await obtenerApps(sinCache);
+          for (const item of encontrados) {
+            const nombre = (item.name || "").toLowerCase();
+            const dev = (item.developer || "").toLowerCase();
+            if (nombre.includes(q) || dev.includes(q)) {
+              resultados.push(item);
+            }
+          }
+        }
+
+        return jsonResponse({ query: q, apps: resultados });
+      }
+
+      // ==========================================
+      // RUTA PRINCIPAL
+      // ==========================================
+      return jsonResponse({
+        status: "online",
+        message: "Cloudflare Worker funcionando",
+        version: "3.3",
+        cache: {
+          home: CACHE.home.data ? "activo" : "vacío",
+          appsEnCache: CACHE.apps.size,
+          listasEnCache: CACHE.lists.size
+        },
+        endpoints: [
+          "/api/app?id=com.example",
+          "/api/download?id=com.whatsapp",
+          "/api/check-update?id=com.whatsapp&version=2.24.1",
+          "/api/random",
+          "/api/home",
+          "/api/list?category=juegos&count=8&type=free",
+          "/api/list?category=apps&count=8&type=paid",
+          "/api/search?q=whatsapp"
+        ]
+      });
+    } catch (error) {
+      return jsonResponse({ error: true, message: error.message }, 500);
+    }
+  }
+};
